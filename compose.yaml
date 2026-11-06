@@ -1,0 +1,223 @@
+services:
+
+  # ==========================================
+  # AUTH DATABASE
+  # ==========================================
+  auth-db:
+    image: postgres:18-alpine
+    container_name: securebank-auth-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${AUTH_DB_NAME}
+      POSTGRES_USER: ${AUTH_DB_USER}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD}
+    ports:
+      - "5434:5432"
+    volumes:
+      - auth_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AUTH_DB_USER} -d ${AUTH_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ==========================================
+  # ACCOUNT DATABASE
+  # ==========================================
+  account-db:
+    image: postgres:18-alpine
+    container_name: securebank-account-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${ACCOUNT_DB_NAME}
+      POSTGRES_USER: ${ACCOUNT_DB_USER}
+      POSTGRES_PASSWORD: ${ACCOUNT_DB_PASSWORD}
+    ports:
+      - "5435:5432"
+    volumes:
+      - account_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ACCOUNT_DB_USER} -d ${ACCOUNT_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ==========================================
+  # TRANSACTION DATABASE
+  # ==========================================
+  transaction-db:
+    image: postgres:18-alpine
+    container_name: securebank-transaction-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${TRANSACTION_DB_NAME}
+      POSTGRES_USER: ${TRANSACTION_DB_USER}
+      POSTGRES_PASSWORD: ${TRANSACTION_DB_PASSWORD}
+    ports:
+      - "5436:5432"
+    volumes:
+      - transaction_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TRANSACTION_DB_USER} -d ${TRANSACTION_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ==========================================
+  # NOTIFICATION DATABASE
+  # ==========================================
+  notification-db:
+    image: postgres:18-alpine
+    container_name: securebank-notification-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${NOTIFICATION_DB_NAME}
+      POSTGRES_USER: ${NOTIFICATION_DB_USER}
+      POSTGRES_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
+    ports:
+      - "5437:5432"
+    volumes:
+      - notification_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NOTIFICATION_DB_USER} -d ${NOTIFICATION_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ==========================================
+  # RABBITMQ MESSAGE BROKER
+  # ==========================================
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: securebank-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ==========================================
+  # AUTH SERVICE
+  # ==========================================
+  auth-service:
+    build:
+      context: ./services/auth-service
+    container_name: securebank-auth
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${AUTH_DB_USER}:${AUTH_DB_PASSWORD}@auth-db:5432/${AUTH_DB_NAME}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+    depends_on:
+      auth-db:
+        condition: service_healthy
+
+  # ==========================================
+  # ACCOUNT SERVICE
+  # ==========================================
+  account-service:
+    build:
+      context: ./services/account-service
+    container_name: securebank-account
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${ACCOUNT_DB_USER}:${ACCOUNT_DB_PASSWORD}@account-db:5432/${ACCOUNT_DB_NAME}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+    depends_on:
+      account-db:
+        condition: service_healthy
+
+  # ==========================================
+  # TRANSACTION SERVICE
+  # ==========================================
+  transaction-service:
+    build:
+      context: ./services/transaction-service
+    container_name: securebank-transaction
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${TRANSACTION_DB_USER}:${TRANSACTION_DB_PASSWORD}@transaction-db:5432/${TRANSACTION_DB_NAME}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      ACCOUNT_SERVICE_URL: http://account-service:8002
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+    depends_on:
+      transaction-db:
+        condition: service_healthy
+      account-service:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  # ==========================================
+  # NOTIFICATION SERVICE
+  # ==========================================
+  notification-service:
+    build:
+      context: ./services/notification-service
+    container_name: securebank-notification
+    restart: unless-stopped
+    ports:
+      - "8004:8004"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${NOTIFICATION_DB_USER}:${NOTIFICATION_DB_PASSWORD}@notification-db:5432/${NOTIFICATION_DB_NAME}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+    depends_on:
+      notification-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+
+  # ==========================================
+  # REACT FRONTEND
+  # ==========================================
+  securebank-frontend:
+    build:
+      context: ./frontend
+    container_name: securebank-frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  # ==========================================
+  # NGINX API GATEWAY
+  # ==========================================
+  gateway:
+    build:
+      context: ./gateway
+    container_name: securebank-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - securebank-frontend
+      - auth-service
+      - account-service
+      - transaction-service
+      - notification-service
+
+# ==========================================
+# PERSISTENT DATABASE VOLUMES
+# ==========================================
+volumes:
+  auth_postgres_data:
+  account_postgres_data:
+  transaction_postgres_data:
+  notification_postgres_data:

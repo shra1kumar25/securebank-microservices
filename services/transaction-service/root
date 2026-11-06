@@ -1,0 +1,3 @@
+TRANSACTION_DB_NAME=transaction_db
+TRANSACTION_DB_USER=transaction_user
+TRANSACTION_DB_PASSWORD=securebank_transaction_dev_only

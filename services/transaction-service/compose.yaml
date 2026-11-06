@@ -1,0 +1,35 @@
+  transaction-db:
+    image: postgres:18-alpine
+    container_name: securebank-transaction-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${TRANSACTION_DB_NAME}
+      POSTGRES_USER: ${TRANSACTION_DB_USER}
+      POSTGRES_PASSWORD: ${TRANSACTION_DB_PASSWORD}
+    ports:
+      - "5436:5432"
+    volumes:
+      - transaction_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TRANSACTION_DB_USER} -d ${TRANSACTION_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  transaction-service:
+    build:
+      context: ./services/transaction-service
+    container_name: securebank-transaction
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${TRANSACTION_DB_USER}:${TRANSACTION_DB_PASSWORD}@transaction-db:5432/${TRANSACTION_DB_NAME}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      ACCOUNT_SERVICE_URL: http://account-service:8002
+    depends_on:
+      transaction-db:
+        condition: service_healthy
+      account-service:
+        condition: service_started
